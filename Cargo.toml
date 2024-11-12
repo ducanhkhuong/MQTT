@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "broker",
+    "client"
+]
+
+
+[workspace.dependencies]
