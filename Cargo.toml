@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "broker",
-    "client"
+    "client",
+    "lib"
 ]
 
 
