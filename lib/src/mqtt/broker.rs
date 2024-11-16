@@ -1,4 +1,5 @@
 pub mod broker{
+    use tokio::sync::mpsc::UnboundedSender;
     use tokio::sync::mpsc;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -6,33 +7,43 @@ pub mod broker{
 
     #[derive(Clone)]
     pub struct Broker {
-        pub tx: mpsc::UnboundedSender<(String, String, Option<mpsc::UnboundedSender<String>>)>,
+        pub tx: UnboundedSender<(
+            String, 
+            String, 
+            Option<UnboundedSender<String>>
+        )>,
     }
 
     impl Broker {
         pub fn new() -> Self {
-            let (tx, mut rx) = mpsc::unbounded_channel::<(String, String, Option<mpsc::UnboundedSender<String>>)>();
+            let (tx, mut rx) = mpsc::unbounded_channel::<(String, String, Option<UnboundedSender<String>>)>();
             
-            tokio::spawn({
-                async move {
-                    let mut subscribers: HashMap<String, Vec<mpsc::UnboundedSender<String>>> = HashMap::new();
+            tokio::spawn({async move {
+                    let mut subscribers: HashMap<String, Vec<UnboundedSender<String>>> = HashMap::new();
+
                     while let Some((topic, message, client_tx)) = rx.recv().await {
+                        //nếu nhận được chỉ thị subscribe
                         if message.is_empty() {
-                            // Handle subscription
+                            
                             if let Some(subs) = subscribers.get_mut(&topic) {
                                 if let Some(tx) = client_tx {
                                     subs.push(tx);
+                                    //println!("sub 3. --- thêm vào bảng băm chỉ kênh truyền khi sub có từ trước đó");
                                 }
                             } else {
                                 if let Some(tx) = client_tx {
                                     subscribers.insert(topic.clone(), vec![tx]);
+                                    //println!("sub 4. --- thêm vào bảng băm (topic và kênh truyền) khi sub chưa có");
                                 }
                             }
-                        } else {
-                            // Handle publishing
+                        }
+
+                        //nếu nhận được chỉ thị publish
+                        else {                         
                             if let Some(subs) = subscribers.get_mut(&topic) {
                                 for sub in subs.iter_mut() {
                                     let _ = sub.send(message.clone());
+                                    //println!("pub 1. gửi mess đến toàn bộ kênh truyền khi nhận được chỉ thị là publish : {:?} ---- {:?}",sub,message);
                                 }
                             }
                         }
@@ -43,9 +54,7 @@ pub mod broker{
         }
 
         pub async fn start(&self, addr: &str) {
-            let listener = TcpListener::bind(addr)
-                .await
-                .expect("Failed to bind to address");
+            let listener = TcpListener::bind(addr).await.expect("Failed to bind to address");
             let mut counter  = 0;
             loop {
                 match listener.accept().await {
@@ -67,10 +76,13 @@ pub mod broker{
         }
     }
 
-    async fn handle_client(stream: TcpStream,tx: mpsc::UnboundedSender<(String, String, Option<mpsc::UnboundedSender<String>>)>,) {
+    async fn handle_client(stream: TcpStream,tx: UnboundedSender<(String, String, Option<UnboundedSender<String>>)>,) 
+    {
         let (mut reader, mut writer) = stream.into_split();
+
         let (client_tx, mut client_rx) = mpsc::unbounded_channel::<String>();
 
+        //client_rx là kênh riêng biệt cho từng client. Đây là kênh dùng để gửi thông điệp từ broker đến client. Mỗi client có một kênh client_tx được lưu ở vector trên new()
         tokio::spawn({
             async move {
                 while let Some(msg) = client_rx.recv().await {
